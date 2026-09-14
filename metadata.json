@@ -1,0 +1,6 @@
+{
+  "name": "ПЕРЕКУП",
+  "description": "Премиальный симулятор перекупщика: поиск выгодных предложений, диагностика, подготовка, переговоры и развитие торговой империи.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
