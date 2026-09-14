@@ -48,19 +48,26 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onOpenAdmin }) => 
   const [activeSection, setActiveSection] = useState<'skills' | 'business' | 'quests' | 'promo'>('skills');
   const [promoInput, setPromoInput] = useState('');
   const [promoMessage, setPromoMessage] = useState<{ text: string; success: boolean } | null>(null);
+  const [isRedeeming, setIsRedeeming] = useState(false);
 
   const currentLevelConfig = PLAYER_LEVELS.find(l => l.level === level) || PLAYER_LEVELS[0];
   const nextLevelConfig = PLAYER_LEVELS.find(l => l.level === level + 1);
   const nextWarehouse = WAREHOUSE_TIERS[warehouseTier + 1];
 
-  const handleRedeem = (e: React.FormEvent) => {
+  const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!promoInput.trim()) return;
+    if (!promoInput.trim() || isRedeeming) return;
 
-    const res = redeemPromoCode(promoInput);
-    setPromoMessage({ text: res.message, success: res.success });
-    if (res.success) {
-      setPromoInput('');
+    setIsRedeeming(true);
+    setPromoMessage(null);
+    try {
+      const res = await redeemPromoCode(promoInput);
+      setPromoMessage({ text: res.message, success: res.success });
+      if (res.success) {
+        setPromoInput('');
+      }
+    } finally {
+      setIsRedeeming(false);
     }
   };
 
@@ -399,13 +406,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onOpenAdmin }) => 
                   value={promoInput}
                   onChange={e => setPromoInput(e.target.value.toUpperCase())}
                   placeholder="ВВЕДИТЕ КОД..."
-                  className="flex-1 px-3 py-2 border border-neutral-300 rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-neutral-900 uppercase"
+                  disabled={isRedeeming}
+                  className="flex-1 px-3 py-2 border border-neutral-300 rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-neutral-900 uppercase disabled:opacity-50"
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-neutral-900 text-white font-bold text-xs rounded-xl hover:bg-neutral-800 transition-colors"
+                  disabled={isRedeeming}
+                  className="px-4 py-2 bg-neutral-900 text-white font-bold text-xs rounded-xl hover:bg-neutral-800 transition-colors disabled:opacity-50 flex items-center space-x-1"
                 >
-                  Применить
+                  {isRedeeming ? (
+                    <span>Проверка...</span>
+                  ) : (
+                    <span>Применить</span>
+                  )}
                 </button>
               </div>
 
@@ -421,6 +434,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onOpenAdmin }) => 
                 </div>
               )}
             </form>
+
+            <div className="flex items-center space-x-1.5 pt-1 text-[10px] text-neutral-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Облачная синхронизация: промокод работает на планшете, телефоне и ПК</span>
+            </div>
           </div>
 
           {/* Quick info note */}

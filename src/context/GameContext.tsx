@@ -27,6 +27,12 @@ import {
 } from '../data/gameConfig';
 import { playBuy, playClick, playError, playNotification, playProfit, playSell } from '../services/sound';
 import { signGameState, verifyAndSanitizeGameState } from '../services/security';
+import {
+  fetchServerPromoCodes,
+  createPromoCodeOnServer,
+  deletePromoCodeOnServer,
+  redeemPromoCodeOnServer,
+} from '../services/api';
 
 interface GameContextType {
   // Player financials & status
@@ -78,7 +84,7 @@ interface GameContextType {
   upgradeWarehouse: () => { success: boolean; message: string };
   hireStaff: (key: 'buyerManager' | 'repairMaster' | 'proPhotographer' | 'salesManager') => { success: boolean; message: string };
   claimQuestReward: (questId: string) => void;
-  redeemPromoCode: (code: string) => { success: boolean; message: string };
+  redeemPromoCode: (code: string) => Promise<{ success: boolean; message: string }>;
 
   // Admin Tools (Password: zxcqwerty)
   createCustomPromoCode: (promo: Omit<PromoCode, 'usedCount'>) => boolean;
@@ -303,6 +309,38 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     }
   }, [savedMeta.tampered, addNotification]);
+
+  // Cloud Sync: Synchronize promo codes with server so codes created on tablet immediately work on phone/PC
+  useEffect(() => {
+    let isMounted = true;
+    const syncPromoCodes = async () => {
+      try {
+        const serverCodes = await fetchServerPromoCodes();
+        if (!isMounted) return;
+        if (serverCodes && serverCodes.length >= 0) {
+          setPromoCodes(prev => {
+            const map = new Map<string, PromoCode>();
+            prev.forEach(p => map.set(p.code.toUpperCase(), p));
+            serverCodes.forEach(p => map.set(p.code.toUpperCase(), p));
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Background sync promo codes failed:', err);
+      }
+    };
+
+    syncPromoCodes();
+    const interval = setInterval(syncPromoCodes, 8000);
+    const onFocus = () => syncPromoCodes();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
 
   // Calculate current warehouse capacity including warehouse skill
   const warehouseSkillLevel = skills.find(s => s.id === 'warehouse')?.currentLevel || 0;
@@ -963,43 +1001,69 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const lastPromoAttemptRef = useRef<number>(0);
 
-  // Redeem Promo Code with anti-spam rate limit and sanitized rewards
+  // Redeem Promo Code with Cloud Server Validation (cross-device) + Anti-Spam
   const redeemPromoCode = useCallback(
-    (rawCode: string) => {
+    async (rawCode: string): Promise<{ success: boolean; message: string }> => {
       const now = Date.now();
-      if (now - lastPromoAttemptRef.current < 750) {
+      if (now - lastPromoAttemptRef.current < 600) {
         return { success: false, message: 'Защита от перебора: подождите секунду перед следующим вводом' };
       }
       lastPromoAttemptRef.current = now;
 
       const cleanCode = rawCode.trim().toUpperCase();
-      const promo = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
 
-      if (!promo) {
+      // 1. First validate on the cloud server (so promo created on tablet works on phone)
+      const serverResult = await redeemPromoCodeOnServer(cleanCode);
+
+      let targetPromo: PromoCode | null = null;
+
+      if (serverResult.success && serverResult.promo) {
+        targetPromo = serverResult.promo;
+      } else if (serverResult.status === 410) {
+        // Explicitly expired / out of uses on server
         playError(soundEnabled);
-        return { success: false, message: 'Промокод не найден или устарел' };
+        return {
+          success: false,
+          message: serverResult.message || `Промокод «${cleanCode}» устарел (лимит исчерпан)`,
+        };
+      } else {
+        // If 404 on server or offline, check if code exists in local memory
+        const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
+        if (local) {
+          if (local.usedCount >= local.maxUses) {
+            playError(soundEnabled);
+            return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
+          }
+          targetPromo = local;
+        } else {
+          playError(soundEnabled);
+          return {
+            success: false,
+            message: serverResult.message || `Промокод «${cleanCode}» не найден или устарел`,
+          };
+        }
       }
 
-      if (promo.usedCount >= promo.maxUses) {
+      if (!targetPromo) {
         playError(soundEnabled);
-        return { success: false, message: 'Этот промокод уже был активирован' };
+        return { success: false, message: `Промокод «${cleanCode}» не найден` };
       }
 
-      // Apply reward with sanitized limits
-      if (promo.rewardType === 'money') {
-        const val = Math.min(10000000, Math.max(0, Math.floor(Number(promo.rewardValue)) || 0));
+      // 2. Apply reward with sanitized limits
+      if (targetPromo.rewardType === 'money') {
+        const val = Math.min(10000000, Math.max(0, Math.floor(Number(targetPromo.rewardValue)) || 0));
         setMoney(m => Math.max(0, m + val));
         addNotification(`Активирован промокод: +${val.toLocaleString('ru-RU')} ₽!`, 'profit');
-      } else if (promo.rewardType === 'xp') {
-        const val = Math.min(50000, Math.max(0, Math.floor(Number(promo.rewardValue)) || 0));
+      } else if (targetPromo.rewardType === 'xp') {
+        const val = Math.min(50000, Math.max(0, Math.floor(Number(targetPromo.rewardValue)) || 0));
         addXp(val);
         addNotification(`Активирован промокод: +${val} XP!`, 'event');
-      } else if (promo.rewardType === 'rep') {
-        const val = Math.min(5.0, Math.max(0, Number(promo.rewardValue) || 0));
+      } else if (targetPromo.rewardType === 'rep') {
+        const val = Math.min(5.0, Math.max(0, Number(targetPromo.rewardValue) || 0));
         setReputation(r => Math.min(5.0, Number((r + val).toFixed(1))));
         addNotification(`Активирован промокод: Репутация +${val}!`, 'profit');
-      } else if (promo.rewardType === 'item') {
-        const itemTitle = String(promo.rewardValue);
+      } else if (targetPromo.rewardType === 'item') {
+        const itemTitle = String(targetPromo.rewardValue);
         const blueprint = ITEM_BLUEPRINTS.find(b => b.title.toLowerCase() === itemTitle.toLowerCase());
         const newItem = generateMarketItem();
         newItem.title = itemTitle;
@@ -1037,26 +1101,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           buyerOffers: [],
         };
         setInventory(prev => [invItem, ...prev]);
-        addNotification(`Активирован промокод: Товар «${promo.rewardValue}» добавлен на склад!`, 'profit');
+        addNotification(`Активирован промокод: Товар «${targetPromo.rewardValue}» добавлен на склад!`, 'profit');
       }
 
-      // Mark used
+      // Mark used in local state
       setPromoCodes(prev =>
         prev.map(p => {
           if (p.code.toUpperCase() === cleanCode) {
-            return { ...p, usedCount: p.usedCount + 1 };
+            return { ...p, usedCount: (p.usedCount || 0) + 1 };
           }
           return p;
         })
       );
 
       playProfit(soundEnabled);
-      return { success: true, message: `Промокод «${cleanCode}» успешно активирован: ${promo.description}` };
+      return { success: true, message: `Промокод «${cleanCode}» успешно активирован: ${targetPromo.description}` };
     },
     [promoCodes, soundEnabled, addNotification, addXp]
   );
 
-  // Admin Panel Functions (Password zxcqwerty)
+  // Admin Panel Functions (Password zxcqwerty) with Cloud Persistence
   const createCustomPromoCode = useCallback(
     (promo: Omit<PromoCode, 'usedCount'>) => {
       const newPromo: PromoCode = {
@@ -1066,7 +1130,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isCustom: true,
       };
       setPromoCodes(prev => [newPromo, ...prev.filter(p => p.code.toUpperCase() !== newPromo.code)]);
-      addNotification(`Создан промо-ключ «${newPromo.code}»`, 'event');
+
+      // Save to cloud server so all devices receive it
+      createPromoCodeOnServer(promo).then(res => {
+        if (res.success) {
+          console.log(`[Cloud Sync] Promo ${newPromo.code} saved to server`);
+        }
+      });
+
+      addNotification(`Создан промо-ключ «${newPromo.code}» (синхронизирован)`, 'event');
       return true;
     },
     [addNotification]
@@ -1076,6 +1148,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (codeToDelete: string) => {
       const clean = codeToDelete.trim().toUpperCase();
       setPromoCodes(prev => prev.filter(p => p.code.toUpperCase() !== clean));
+
+      // Remove from cloud server
+      deletePromoCodeOnServer(clean);
+
       addNotification(`Промокод «${clean}» удален`, 'neutral');
       return true;
     },

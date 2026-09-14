@@ -605,10 +605,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                     <span>Создать промокод</span>
                   </button>
 
+                  <div className="flex items-center justify-center space-x-1.5 pt-1 text-[10px] text-neutral-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Синхронизация с сервером: код будет сразу работать на любом вашем устройстве</span>
+                  </div>
+
                   {keyCreatedSuccess && (
                     <div className="flex items-center justify-center space-x-1 text-emerald-600 text-xs font-semibold py-1 animate-in fade-in">
                       <Check className="w-3.5 h-3.5" />
-                      <span>Ключ «{newCode}» успешно создан и готов к активации!</span>
+                      <span>Ключ «{newCode}» успешно создан и сохранен в облачной базе!</span>
                     </div>
                   )}
                 </form>
