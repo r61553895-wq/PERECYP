@@ -63,8 +63,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onOpenAdmin 
             <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
               Текущий капитал
             </div>
-            <div className="text-3xl font-extrabold text-neutral-950 tracking-tight mt-1 font-mono">
-              {money.toLocaleString('ru-RU')} <span className="text-lg font-bold text-neutral-500">₽</span>
+            <div className="flex items-center space-x-2 mt-1">
+              <div className="text-3xl font-extrabold text-neutral-950 tracking-tight font-mono">
+                {money.toLocaleString('ru-RU')} <span className="text-lg font-bold text-neutral-500">₽</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('switch-nav-tab', { detail: 'profile' }));
+                  window.dispatchEvent(new CustomEvent('open-donate-tab'));
+                }}
+                className="px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-bold transition-all active:scale-95 flex items-center space-x-1"
+                title="Пополнить валюту"
+              >
+                <span>+</span>
+                <span>Донат</span>
+              </button>
             </div>
           </div>
           <div className="flex flex-col items-end">

@@ -19,6 +19,26 @@ const GameContainer: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
+  React.useEffect(() => {
+    const handleSwitchNav = (e: Event) => {
+      const customEvent = e as CustomEvent<NavTab>;
+      if (customEvent.detail) {
+        setActiveTab(customEvent.detail);
+      } else {
+        setActiveTab('profile');
+      }
+    };
+    const handleOpenDonate = () => {
+      setActiveTab('profile');
+    };
+    window.addEventListener('switch-nav-tab', handleSwitchNav);
+    window.addEventListener('open-donate-tab', handleOpenDonate);
+    return () => {
+      window.removeEventListener('switch-nav-tab', handleSwitchNav);
+      window.removeEventListener('open-donate-tab', handleOpenDonate);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#F5F5F7] text-neutral-900 font-sans antialiased selection:bg-neutral-900 selection:text-white flex flex-col">
       {/* Top sticky app header */}

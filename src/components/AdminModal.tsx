@@ -17,6 +17,9 @@ import {
   Shuffle,
   Tag,
   Trash2,
+  Globe,
+  Users,
+  Share2,
 } from 'lucide-react';
 import { PromoCode } from '../types';
 import { ITEM_BLUEPRINTS, CATEGORY_LABELS } from '../data/itemsData';
@@ -74,8 +77,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
   const [newCode, setNewCode] = useState('');
   const [rewardType, setRewardType] = useState<'money' | 'xp' | 'rep' | 'item'>('money');
   const [rewardValue, setRewardValue] = useState('50000');
-  const [description, setDescription] = useState('Бонусный промо-ключ');
-  const [maxUses, setMaxUses] = useState('1');
+  const [description, setDescription] = useState('Промокод для зрителей');
+  const [isAudienceMode, setIsAudienceMode] = useState(true); // Default true: each viewer can redeem once
+  const [maxUses, setMaxUses] = useState('100');
   const [keyCreatedSuccess, setKeyCreatedSuccess] = useState(false);
 
   // Copy & Item selection state
@@ -118,17 +122,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Smart promo key auto-generator
+  // Smart promo key auto-generator (formats like WWWW-1234, STREAM-777, BONUS-50K)
   const handleGenerateRandomCode = () => {
-    let prefixes = ['PRKP', 'VIP', 'BONUS', 'GIFT', 'LUCKY', 'DROP', 'SECRET', 'TOP', 'BOOST', 'CASH'];
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const randLetters = (len: number) => Array.from({ length: len }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
+
+    let prefixes = ['WWWW', 'STREAM', 'PEREKUP', 'PROMO', 'BONUS', 'LUCKY', 'GIFT', 'VIP', 'DROP'];
     if (rewardType === 'money') {
-      prefixes = ['CASH', 'MONEY', 'RUB', 'PROFIT', 'BANK', 'PRKP'];
+      prefixes = ['CASH', 'MONEY', 'WWWW', 'RUB', 'PROFIT', 'BANK'];
     } else if (rewardType === 'xp') {
-      prefixes = ['EXP', 'LEVEL', 'BOOST', 'SKILL', 'MASTER'];
+      prefixes = ['EXP', 'LEVEL', 'BOOST', 'SKILL', 'WWWW'];
     } else if (rewardType === 'rep') {
       prefixes = ['STAR', 'REP', 'HONOR', 'VIP', 'TRUST'];
     } else if (rewardType === 'item') {
-      prefixes = ['DROP', 'GIFT', 'LOOT', 'DEVICE', 'TECH', 'GEAR', 'PRKP'];
+      prefixes = ['DROP', 'GIFT', 'LOOT', 'TECH', 'GEAR'];
       if (rewardValue) {
         const lower = rewardValue.toLowerCase();
         if (lower.includes('iphone')) prefixes = ['IPHONE', 'APPLE', 'DROP'];
@@ -139,7 +146,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
       }
     }
 
-    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    // 50% chance of standard 4-letter prefix like WWWW, 50% chance of thematic word
+    const prefix = Math.random() > 0.4 ? prefixes[Math.floor(Math.random() * prefixes.length)] : randLetters(4);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     const generated = `${prefix}-${randomNum}`;
     setNewCode(generated);
@@ -226,8 +234,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
       code: newCode.trim().toUpperCase(),
       rewardType,
       rewardValue: parsedVal,
-      description: description || 'Специальный ключ разработчика',
-      maxUses: Math.max(1, parseInt(maxUses) || 1),
+      description: description || (isAudienceMode ? 'Промокод для всех зрителей' : 'Специальный промокод'),
+      forAudience: isAudienceMode,
+      maxUses: isAudienceMode ? 999999 : Math.max(1, parseInt(maxUses) || 1),
     };
 
     createCustomPromoCode(newPromo);
@@ -587,34 +596,99 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                   {/* Description */}
                   <div>
                     <label className="block text-[11px] font-semibold text-neutral-600 mb-1">
-                      Описание ключа
+                      Описание промокода
                     </label>
                     <input
                       type="text"
                       value={description}
                       onChange={e => setDescription(e.target.value)}
-                      placeholder="Краткое описание"
+                      placeholder="Например: Промокод для подписчиков стрима"
                       className="w-full px-3 py-2 rounded-lg border border-neutral-300 text-xs focus:outline-none focus:border-neutral-900 bg-white"
                     />
                   </div>
 
+                  {/* Audience Mode Selector */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <label className="block text-[11px] font-semibold text-neutral-700">
+                      Режим активации для аудитории
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsAudienceMode(true)}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${
+                          isAudienceMode
+                            ? 'border-neutral-900 bg-neutral-900 text-white font-medium shadow-sm'
+                            : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-1.5">
+                          <Users className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-xs font-bold">Для всей аудитории</span>
+                        </div>
+                        <p className={`text-[10px] mt-1 leading-tight ${isAudienceMode ? 'text-neutral-300' : 'text-neutral-500'}`}>
+                          Каждый зритель/игрок может активировать 1 раз
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsAudienceMode(false)}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${
+                          !isAudienceMode
+                            ? 'border-neutral-900 bg-neutral-900 text-white font-medium shadow-sm'
+                            : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-1.5">
+                          <Lock className="w-3.5 h-3.5 text-amber-400" />
+                          <span className="text-xs font-bold">Лимит активаций</span>
+                        </div>
+                        <p className={`text-[10px] mt-1 leading-tight ${!isAudienceMode ? 'text-neutral-300' : 'text-neutral-500'}`}>
+                          Ограниченное кол-во первых копий
+                        </p>
+                      </button>
+                    </div>
+
+                    {!isAudienceMode && (
+                      <div className="mt-1.5 p-2 bg-neutral-50 rounded-xl border border-neutral-200">
+                        <label className="block text-[10px] font-medium text-neutral-600 mb-1">
+                          Максимальное количество активаций (на всех):
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="999999"
+                          value={maxUses}
+                          onChange={e => setMaxUses(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg border border-neutral-300 text-xs font-mono focus:outline-none focus:border-neutral-900 bg-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="submit"
-                    className="w-full py-2.5 rounded-lg bg-neutral-900 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 hover:bg-neutral-800 active:scale-[0.98] transition-all mt-2 shadow-sm"
+                    className="w-full py-2.5 rounded-xl bg-neutral-900 text-white text-xs font-bold flex items-center justify-center space-x-1.5 hover:bg-neutral-800 active:scale-[0.98] transition-all mt-2 shadow-sm"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Создать промокод</span>
+                    <Plus className="w-4 h-4" />
+                    <span>Опубликовать промокод</span>
                   </button>
 
                   <div className="flex items-center justify-center space-x-1.5 pt-1 text-[10px] text-neutral-500">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span>Синхронизация с сервером: код будет сразу работать на любом вашем устройстве</span>
+                    <Globe className="w-3 h-3 text-emerald-600" />
+                    <span>Глобальное облако: код сразу активен в любой стране и на всех устройствах</span>
                   </div>
 
                   {keyCreatedSuccess && (
-                    <div className="flex items-center justify-center space-x-1 text-emerald-600 text-xs font-semibold py-1 animate-in fade-in">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Ключ «{newCode}» успешно создан и сохранен в облачной базе!</span>
+                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-1 animate-in fade-in">
+                      <div className="flex items-center space-x-1.5 font-bold">
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span>Промокод «{newCode}» успешно создан и опубликован!</span>
+                      </div>
+                      <p className="text-[10px] text-emerald-700 leading-relaxed">
+                        Код доступен для активации в любой стране прямо сейчас.
+                      </p>
                     </div>
                   )}
                 </form>
@@ -624,93 +698,113 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-600">
-                    Все ключи и промокоды ({promoCodes.length})
+                    Все промокоды ({promoCodes.length})
                   </h4>
-                  <span className="text-[10px] text-neutral-400">Нажмите на иконку для копирования</span>
+                  <span className="text-[10px] text-neutral-400">Нажмите чтобы скопировать</span>
                 </div>
 
-                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
                   {promoCodes.length === 0 ? (
                     <div className="p-4 rounded-xl border border-dashed border-neutral-200 text-center text-neutral-400 text-xs">
                       Промокодов пока нет. Сгенерируйте первый ключ в форме выше!
                     </div>
                   ) : (
-                    promoCodes.map((p, idx) => (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-lg border border-neutral-200 bg-white flex items-center justify-between text-xs hover:border-neutral-300 transition-colors"
-                      >
-                        <div className="space-y-0.5 max-w-[65%]">
-                          <div className="font-mono font-bold text-neutral-900 flex items-center space-x-1.5 flex-wrap gap-y-0.5">
-                            <span>{p.code}</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-700 font-sans font-medium">
-                              {p.rewardType === 'money'
-                                ? `${Number(p.rewardValue).toLocaleString('ru-RU')} ₽`
-                                : p.rewardType === 'xp'
-                                ? `${p.rewardValue} XP`
-                                : p.rewardType === 'item'
-                                ? `📦 ${String(p.rewardValue).substring(0, 22)}${String(p.rewardValue).length > 22 ? '…' : ''}`
-                                : `+${p.rewardValue}★`}
-                            </span>
+                    promoCodes.map((p, idx) => {
+                      const isAudience = p.forAudience || p.maxUses >= 9999;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-xl border border-neutral-200 bg-white flex items-center justify-between text-xs hover:border-neutral-300 transition-colors shadow-xs"
+                        >
+                          <div className="space-y-0.5 max-w-[58%]">
+                            <div className="font-mono font-bold text-neutral-900 flex items-center space-x-1.5 flex-wrap gap-y-0.5">
+                              <span className="text-sm tracking-tight">{p.code}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-700 font-sans font-medium">
+                                {p.rewardType === 'money'
+                                  ? `${Number(p.rewardValue).toLocaleString('ru-RU')} ₽`
+                                  : p.rewardType === 'xp'
+                                  ? `${p.rewardValue} XP`
+                                  : p.rewardType === 'item'
+                                  ? `📦 ${String(p.rewardValue).substring(0, 20)}${String(p.rewardValue).length > 20 ? '…' : ''}`
+                                  : `+${p.rewardValue}★`}
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-1.5">
+                              {isAudience ? (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center space-x-1">
+                                  <Users className="w-2.5 h-2.5" />
+                                  <span>Для аудитории (1 раз/игрок)</span>
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-neutral-100 text-neutral-600">
+                                  Активаций: {p.usedCount} / {p.maxUses}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-neutral-500 truncate" title={p.description}>
+                              {p.description}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-neutral-500 truncate" title={p.description}>
-                            {p.description}
+
+                          <div className="flex items-center space-x-1 shrink-0">
+                            {/* Copy Code */}
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(p.code, p.code)}
+                              title={`Скопировать код «${p.code}»`}
+                              className={`px-2 py-1.5 rounded-lg border text-xs font-mono font-bold transition-all active:scale-90 flex items-center space-x-1 ${
+                                copiedCodeId === p.code
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                  : 'border-neutral-300 text-neutral-800 hover:bg-neutral-100'
+                              }`}
+                            >
+                              {copiedCodeId === p.code ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="text-[10px]">Скопирован</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5 text-neutral-500" />
+                                  <span>{p.code}</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Copy Stream / Chat post message */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const msg = `Ловите промокод: ${p.code} (вводи в игре Перекуп в меню Профиль!)`;
+                                copyToClipboard(msg, `share_${p.code}`);
+                              }}
+                              title="Скопировать текст для чата/стрима"
+                              className={`p-1.5 rounded-lg border transition-all active:scale-90 ${
+                                copiedCodeId === `share_${p.code}`
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
+                                  : 'border-neutral-200 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100'
+                              }`}
+                            >
+                              {copiedCodeId === `share_${p.code}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Share2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+
+                            {/* Delete button */}
+                            <button
+                              type="button"
+                              onClick={() => deletePromoCode(p.code)}
+                              title={`Удалить промокод ${p.code}`}
+                              className="p-1.5 rounded-lg border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-all active:scale-90"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-
-                        <div className="flex items-center space-x-1.5 shrink-0">
-                          <span className="text-[10px] font-medium text-neutral-500 bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-200">
-                            {p.usedCount} / {p.maxUses}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(p.code, p.code)}
-                            title={`Скопировать код «${p.code}»`}
-                            className={`p-1.5 rounded-md border transition-all active:scale-90 ${
-                              copiedCodeId === p.code
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
-                                : 'border-neutral-200 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100'
-                            }`}
-                          >
-                            {copiedCodeId === p.code ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const vk = generateUniversalVoucher(p.rewardType, p.rewardValue);
-                              copyToClipboard(vk, `vk_${p.code}`);
-                            }}
-                            title="Скопировать универсальный ключ (VK-...) — работает на любом телефоне/планшете даже без сети"
-                            className={`p-1.5 rounded-md border transition-all active:scale-90 ${
-                              copiedCodeId === `vk_${p.code}`
-                                ? 'bg-amber-50 border-amber-300 text-amber-600'
-                                : 'border-neutral-200 text-amber-600 hover:bg-amber-50 hover:border-amber-200'
-                            }`}
-                          >
-                            {copiedCodeId === `vk_${p.code}` ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            ) : (
-                              <Key className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => deletePromoCode(p.code)}
-                            title={`Удалить ключ ${p.code}`}
-                            className="p-1.5 rounded-md border border-neutral-200 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-all active:scale-90"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

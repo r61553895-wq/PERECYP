@@ -31,8 +31,22 @@ export const Header: React.FC = () => {
 
         {/* Right: Financial Stats & Reputation */}
         <div className="flex flex-col items-end">
-          <div className="text-base font-extrabold tracking-tight text-neutral-950 font-mono">
-            {money.toLocaleString('ru-RU')} <span className="text-xs font-semibold text-neutral-600">₽</span>
+          <div className="flex items-center space-x-1.5">
+            <span className="text-base font-extrabold tracking-tight text-neutral-950 font-mono">
+              {money.toLocaleString('ru-RU')} <span className="text-xs font-semibold text-neutral-600">₽</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('switch-nav-tab', { detail: 'profile' }));
+                window.dispatchEvent(new CustomEvent('open-donate-tab'));
+              }}
+              title="Донат и пополнение валюты"
+              className="px-1.5 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-extrabold transition-all active:scale-95 flex items-center space-x-0.5"
+            >
+              <span>+</span>
+              <span>Донат</span>
+            </button>
           </div>
           <div className="flex items-center space-x-2 text-[11px]">
             <span className={`font-semibold ${todayProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>

@@ -141,6 +141,7 @@ export interface PromoCode {
   usedCount: number;
   isCustom?: boolean;
   createdAt?: number;
+  forAudience?: boolean; // When true, every player/viewer can redeem once
 }
 
 export interface MarketNews {

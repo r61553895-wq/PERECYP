@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "code": "WWWW-1234",
+    "rewardType": "money",
+    "rewardValue": 100000,
+    "description": "Тестовый промокод для стрима и аудитории",
+    "maxUses": 999999,
+    "usedCount": 1,
+    "forAudience": true,
+    "isCustom": true,
+    "createdAt": 1789470055556
+  },
+  {
+    "code": "STREAM50K",
+    "rewardType": "money",
+    "rewardValue": 50000,
+    "description": "Бонус со стрима",
+    "maxUses": 99999,
+    "usedCount": 0,
+    "createdAt": 1789469850782
+  }
+]

@@ -28,6 +28,20 @@ import {
 import { playBuy, playClick, playError, playNotification, playProfit, playSell } from '../services/sound';
 import { signGameState, verifyAndSanitizeGameState } from '../services/security';
 import {
+  loadSynchronousState,
+  saveToLocalTiers,
+  pushSaveToServer,
+  fetchSaveFromServer,
+  getOrCreatePlayerId,
+  getOrCreateSaveCode,
+  getSaveParamFromUrl,
+  loadFromIndexedDB,
+  isStateSubstantial,
+  PRIMARY_STORAGE_KEY,
+  BACKUP_STORAGE_KEY,
+  SAVE_CODE_KEY,
+} from '../services/storage';
+import {
   fetchServerPromoCodes,
   createPromoCodeOnServer,
   deletePromoCodeOnServer,
@@ -60,6 +74,13 @@ interface GameContextType {
     proPhotographer: boolean;
     salesManager: boolean;
   };
+
+  // Cloud & Transfer Save
+  saveCode: string;
+  playerId: string;
+  isCloudSynced: boolean;
+  syncWithCloudNow: () => Promise<boolean>;
+  loadSaveByCode: (code: string) => Promise<{ success: boolean; message: string }>;
 
   // Lists & State
   marketItems: MarketItem[];
@@ -98,39 +119,20 @@ interface GameContextType {
   adminResetGame: () => void;
 }
 
-const STORAGE_KEY = 'perekup_game_state_v1';
-
-interface LoadedStateWrapper {
-  data: any;
-  tampered: boolean;
-  tamperReason?: string;
-}
-
-// Synchronous safe loader with cryptographic signature verification and anti-tamper sanitation
-function loadSavedGameState(): LoadedStateWrapper {
-  if (typeof window === 'undefined') return { data: null, tampered: false };
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { data: null, tampered: false };
-    const parsed = JSON.parse(raw);
-    const verified = verifyAndSanitizeGameState(parsed);
-    return {
-      data: verified.sanitizedState,
-      tampered: verified.tampered,
-      tamperReason: verified.reason,
-    };
-  } catch (e) {
-    console.warn('Could not parse saved game state:', e);
-  }
-  return { data: null, tampered: false };
-}
-
 export const GameContext = createContext<GameContextType | null>(null);
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Read and verify saved state synchronously once on startup
-  const savedMeta = useMemo(() => loadSavedGameState(), []);
+  // Read and verify saved state synchronously from local storage tiers
+  const savedMeta = useMemo(() => loadSynchronousState(), []);
   const saved = savedMeta.data;
+
+  // Player permanent ID and Save Code for cloud cross-device sync
+  const [playerId] = useState<string>(() => getOrCreatePlayerId());
+  const [saveCode] = useState<string>(() => getOrCreateSaveCode());
+  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
+  const isHydratedRef = useRef<boolean>(false);
+  const latestStateRef = useRef<any>(null);
+  const cloudSaveTimerRef = useRef<any>(null);
 
   // Player financials & status initialized directly from saved state
   const [money, setMoney] = useState<number>(() =>
@@ -216,8 +218,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     },
   ]);
 
-  // Persist state to localStorage whenever game state changes
+  // Method to apply state loaded from any tier
+  const applyLoadedState = useCallback((loaded: any) => {
+    if (!loaded || typeof loaded !== 'object') return;
+    if (typeof loaded.money === 'number') setMoney(loaded.money);
+    if (typeof loaded.todayProfit === 'number') setTodayProfit(loaded.todayProfit);
+    if (typeof loaded.totalProfit === 'number') setTotalProfit(loaded.totalProfit);
+    if (typeof loaded.totalDeals === 'number') setTotalDeals(loaded.totalDeals);
+    if (typeof loaded.reputation === 'number') setReputation(loaded.reputation);
+    if (Array.isArray(loaded.reviews) && loaded.reviews.length > 0) setReviews(loaded.reviews);
+    if (typeof loaded.level === 'number') setLevel(loaded.level);
+    if (typeof loaded.xp === 'number') setXp(loaded.xp);
+    if (typeof loaded.skillPoints === 'number') setSkillPoints(loaded.skillPoints);
+    if (Array.isArray(loaded.skills) && loaded.skills.length > 0) setSkills(loaded.skills);
+    if (typeof loaded.day === 'number') setDay(loaded.day);
+    if (typeof loaded.soundEnabled === 'boolean') setSoundEnabled(loaded.soundEnabled);
+    if (typeof loaded.warehouseTier === 'number') setWarehouseTier(loaded.warehouseTier);
+    if (loaded.hiredStaff && typeof loaded.hiredStaff === 'object') setHiredStaff(loaded.hiredStaff);
+    if (Array.isArray(loaded.marketItems) && loaded.marketItems.length > 0) setMarketItems(loaded.marketItems);
+    if (Array.isArray(loaded.inventory)) setInventory(loaded.inventory);
+    if (Array.isArray(loaded.quests) && loaded.quests.length > 0) setQuests(loaded.quests);
+    if (Array.isArray(loaded.promoCodes)) setPromoCodes(loaded.promoCodes);
+  }, []);
+
+  // Persist state across LocalStorage, IndexedDB, and Cloud Server
   const saveGameState = useCallback(() => {
+    // Prevent overwriting existing save with empty defaults before hydration completes
+    if (!isHydratedRef.current) return;
+
     try {
       const stateToSave = {
         money: Math.max(0, Math.floor(money)),
@@ -240,10 +268,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         promoCodes,
         lastSaved: Date.now(),
       };
-      const signedState = signGameState(stateToSave);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(signedState));
+      latestStateRef.current = stateToSave;
+
+      // 1. Instant local persistence (localStorage + secondary backup + IndexedDB)
+      saveToLocalTiers(stateToSave);
+
+      // 2. Debounced background cloud sync to server
+      if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+      cloudSaveTimerRef.current = setTimeout(async () => {
+        const ok = await pushSaveToServer(stateToSave);
+        if (ok) setIsCloudSynced(true);
+      }, 1200);
     } catch (e) {
-      console.warn('LocalStorage save failed:', e);
+      console.warn('Save error:', e);
     }
   }, [
     money,
@@ -274,13 +311,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Ensure state is flushed on page reload / tab close / visibility change
   useEffect(() => {
     const handleSave = () => {
-      saveGameState();
+      if (latestStateRef.current && isHydratedRef.current) {
+        saveToLocalTiers(latestStateRef.current);
+        try {
+          const pid = getOrCreatePlayerId();
+          const sc = getOrCreateSaveCode();
+          const payload = JSON.stringify({
+            playerId: pid,
+            saveCode: sc,
+            state: latestStateRef.current,
+            updatedAt: Date.now(),
+          });
+          navigator.sendBeacon?.('/api/player-save', new Blob([payload], { type: 'application/json' }));
+        } catch {}
+      }
     };
     window.addEventListener('beforeunload', handleSave);
     window.addEventListener('pagehide', handleSave);
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
-        saveGameState();
+        handleSave();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -290,7 +340,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.removeEventListener('pagehide', handleSave);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [saveGameState]);
+  }, []);
 
   // Push floating notification helper
   const addNotification = useCallback((text: string, type: 'profit' | 'loss' | 'neutral' | 'event' = 'neutral') => {
@@ -300,6 +350,73 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 3500);
   }, []);
+
+  // Multi-tier background hydration (URL ?save=..., IndexedDB, Cloud Server)
+  useEffect(() => {
+    let active = true;
+    const initializeAndHydrate = async () => {
+      // 1. Check URL parameters for save code
+      const urlSaveCode = getSaveParamFromUrl();
+      if (urlSaveCode) {
+        try {
+          const remoteState = await fetchSaveFromServer(urlSaveCode);
+          if (active && remoteState && isStateSubstantial(remoteState)) {
+            applyLoadedState(remoteState);
+            saveToLocalTiers(remoteState);
+            latestStateRef.current = remoteState;
+            setIsCloudSynced(true);
+            addNotification(`☁️ Прогресс успешно загружен по ссылке сохранения (${urlSaveCode})!`, 'profit');
+            isHydratedRef.current = true;
+            return;
+          }
+        } catch (err) {
+          console.warn('URL save load error:', err);
+        }
+      }
+
+      // 2. If synchronous local state was default or empty, check IndexedDB
+      if (!isStateSubstantial(saved)) {
+        try {
+          const idbState = await loadFromIndexedDB();
+          if (active && idbState && isStateSubstantial(idbState)) {
+            applyLoadedState(idbState);
+            saveToLocalTiers(idbState);
+            latestStateRef.current = idbState;
+            setIsCloudSynced(true);
+            addNotification('💾 Прогресс восстановлен из базы данных браузера!', 'event');
+            isHydratedRef.current = true;
+            return;
+          }
+        } catch {}
+
+        // 3. Check Server Cloud Save for current player ID
+        try {
+          const serverSave = await fetchSaveFromServer(playerId);
+          if (active && serverSave && isStateSubstantial(serverSave)) {
+            applyLoadedState(serverSave);
+            saveToLocalTiers(serverSave);
+            latestStateRef.current = serverSave;
+            setIsCloudSynced(true);
+            addNotification('☁️ Прогресс восстановлен из облачного хранилища!', 'event');
+            isHydratedRef.current = true;
+            return;
+          }
+        } catch {}
+      } else {
+        // Local state was already substantial - keep it and ensure cloud is synced
+        latestStateRef.current = saved;
+        pushSaveToServer(saved).catch(() => {});
+        setIsCloudSynced(true);
+      }
+
+      isHydratedRef.current = true;
+    };
+
+    initializeAndHydrate();
+    return () => {
+      active = false;
+    };
+  }, [saved, playerId, applyLoadedState, addNotification]);
 
   // Alert player if saved state was tampered with
   useEffect(() => {
@@ -1032,48 +1149,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      // 2. If not a voucher, validate on the cloud server (cross-device database)
+      // 2. Validate on the Global Cloud / Server (instant cross-device and cross-country verification)
       if (!targetPromo) {
         const serverResult = await redeemPromoCodeOnServer(cleanCode);
 
         if (serverResult.success && serverResult.promo) {
           targetPromo = serverResult.promo;
-        } else if (serverResult.status === 410) {
-          playError(soundEnabled);
-          return {
-            success: false,
-            message: serverResult.message || `Промокод «${cleanCode}» устарел (лимит исчерпан)`,
-          };
-        } else if (serverResult.status === 404) {
-          // Check local memory as fallback
-          const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
-          if (local) {
-            if (local.usedCount >= local.maxUses) {
-              playError(soundEnabled);
-              return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
-            }
-            targetPromo = local;
-          } else {
-            playError(soundEnabled);
-            return {
-              success: false,
-              message: `Промокод «${cleanCode}» не найден`,
-            };
-          }
         } else {
-          // Status 0 (network unreachable or cross-instance)
+          // If server reported already redeemed, expired, or not found, also check local active promos
           const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
-          if (local) {
-            if (local.usedCount >= local.maxUses) {
-              playError(soundEnabled);
-              return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
-            }
+          if (local && (serverResult.status === 0 || serverResult.status === 404)) {
             targetPromo = local;
           } else {
             playError(soundEnabled);
             return {
               success: false,
-              message: `Не удалось связаться с сервером для проверки «${cleanCode}». Создайте универсальный ключ (начинается с VK-) в панели разработчика для мгновенного переноса между любыми устройствами.`,
+              message: serverResult.message || `Промокод «${cleanCode}» не найден`,
             };
           }
         }
@@ -1241,9 +1332,43 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [addNotification]
   );
 
+  const syncWithCloudNow = useCallback(async () => {
+    if (!latestStateRef.current) return false;
+    const ok = await pushSaveToServer(latestStateRef.current);
+    if (ok) {
+      setIsCloudSynced(true);
+      addNotification('☁️ Прогресс успешно сохранен в облаке!', 'profit');
+      return true;
+    }
+    return false;
+  }, [addNotification]);
+
+  const loadSaveByCode = useCallback(async (code: string) => {
+    if (!code || !code.trim()) {
+      return { success: false, message: 'Введите код сохранения' };
+    }
+    const cleanCode = code.trim().toUpperCase();
+    const remoteState = await fetchSaveFromServer(cleanCode);
+    if (remoteState) {
+      applyLoadedState(remoteState);
+      saveToLocalTiers(remoteState);
+      latestStateRef.current = remoteState;
+      setIsCloudSynced(true);
+      addNotification(`☁️ Прогресс успешно перенесен по коду «${cleanCode}»!`, 'profit');
+      return { success: true, message: 'Прогресс успешно загружен' };
+    } else {
+      return { success: false, message: `Сохранение с кодом «${cleanCode}» не найдено в облаке` };
+    }
+  }, [applyLoadedState, addNotification]);
+
   const adminResetGame = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    window.location.reload();
+    try {
+      localStorage.removeItem(PRIMARY_STORAGE_KEY);
+      localStorage.removeItem(BACKUP_STORAGE_KEY);
+      localStorage.removeItem(SAVE_CODE_KEY);
+      localStorage.removeItem('perekup_used_vouchers');
+    } catch {}
+    window.location.href = window.location.origin + window.location.pathname;
   }, []);
 
   // Periodic background simulation: generate new buyer offers for listed items & refresh news
@@ -1335,6 +1460,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         marketNews,
         notifications,
         promoCodes,
+        saveCode,
+        playerId,
+        isCloudSynced,
+        syncWithCloudNow,
+        loadSaveByCode,
         setSoundEnabled,
         refreshMarket,
         inspectMarketItem,
