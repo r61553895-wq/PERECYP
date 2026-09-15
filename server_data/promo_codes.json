@@ -18,5 +18,71 @@
     "maxUses": 99999,
     "usedCount": 0,
     "createdAt": 1789469850782
+  },
+  {
+    "code": "RUB-3551",
+    "rewardType": "money",
+    "rewardValue": 600000,
+    "description": "Промокод для игроков",
+    "forAudience": true,
+    "maxUses": 999999,
+    "usedCount": 0,
+    "isCustom": true,
+    "createdAt": 1789471803856
+  },
+  {
+    "code": "RRRR-1111",
+    "rewardType": "money",
+    "rewardValue": 50000,
+    "description": "Промокод для зрителей",
+    "forAudience": true,
+    "maxUses": 999999,
+    "usedCount": 1,
+    "isCustom": true,
+    "createdAt": 1726400000000
+  },
+  {
+    "code": "WWWW-6666",
+    "rewardType": "money",
+    "rewardValue": 50000,
+    "description": "Бонусный промо-ключ",
+    "forAudience": true,
+    "maxUses": 999999,
+    "usedCount": 1,
+    "isCustom": true,
+    "createdAt": 1726400000000
+  },
+  {
+    "code": "RUB3551",
+    "rewardType": "money",
+    "rewardValue": 600000,
+    "description": "Промокод для игроков",
+    "forAudience": true,
+    "maxUses": 999999,
+    "usedCount": 0,
+    "isCustom": true,
+    "createdAt": 1789471804238
+  },
+  {
+    "code": "RRRR1111",
+    "rewardType": "money",
+    "rewardValue": 50000,
+    "description": "Промокод для игроков",
+    "forAudience": true,
+    "maxUses": 999999,
+    "usedCount": 0,
+    "isCustom": true,
+    "createdAt": 1789471804352
+  },
+  {
+    "code": "WWWW6666",
+    "rewardType": "money",
+    "rewardValue": 50000,
+    "description": "Промокод для игроков",
+    "forAudience": false,
+    "maxUses": 1,
+    "usedCount": 0,
+    "isCustom": true,
+    "createdAt": 1789471804492
   }
 ]

@@ -30,14 +30,52 @@ const DATA_DIR = path.join(process.cwd(), 'server_data');
 const PROMO_CODES_FILE = path.join(DATA_DIR, 'promo_codes.json');
 const PLAYER_SAVES_DIR = path.join(DATA_DIR, 'player_saves');
 const CODE_MAP_FILE = path.join(DATA_DIR, 'save_codes.json');
-const GLOBAL_CLOUD_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a0a4b741be0e3f';
+const CLOUD_APP_KEY_PRIMARY = 'p4hs9c32';
+const CLOUD_APP_KEY_BACKUP = '6kwaihe2';
+const CLOUD_BASE_URL = 'https://keyvalue.immanuel.co/api/KeyVal';
+
+const DEFAULT_SERVER_PROMOS = [
+  {
+    code: 'RUB-3551',
+    rewardType: 'money',
+    rewardValue: 600000,
+    description: 'Промокод для зрителей',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+  {
+    code: 'RRRR-1111',
+    rewardType: 'money',
+    rewardValue: 50000,
+    description: 'Промокод для зрителей',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+  {
+    code: 'WWWW-6666',
+    rewardType: 'money',
+    rewardValue: 50000,
+    description: 'Бонусный промо-ключ',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+];
 
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   if (!fs.existsSync(PROMO_CODES_FILE)) {
-    fs.writeFileSync(PROMO_CODES_FILE, JSON.stringify([], null, 2), 'utf-8');
+    fs.writeFileSync(PROMO_CODES_FILE, JSON.stringify(DEFAULT_SERVER_PROMOS, null, 2), 'utf-8');
   }
   if (!fs.existsSync(PLAYER_SAVES_DIR)) {
     fs.mkdirSync(PLAYER_SAVES_DIR, { recursive: true });
@@ -87,19 +125,87 @@ function savePromoCodes(codes: any[]) {
 
 async function syncWithGlobalCloud(): Promise<any[]> {
   try {
-    const res = await fetch(GLOBAL_CLOUD_URL, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${CLOUD_BASE_URL}/GetValue/${CLOUD_APP_KEY_PRIMARY}/PROMO_INDEX`, {
+      signal: AbortSignal.timeout(3500),
+    });
     if (res.ok) {
-      const json: any = await res.json();
-      if (json?.data?.promoCodes && Array.isArray(json.data.promoCodes)) {
-        const cloudCodes = json.data.promoCodes;
+      const rawText = await res.text();
+      let clean = rawText.trim();
+      if (clean.startsWith('"') && clean.endsWith('"')) {
+        clean = clean.slice(1, -1);
+      }
+      if (clean && !clean.startsWith('<!DOCTYPE') && clean !== 'null') {
+        const keys = clean.split(',').map(k => k.trim()).filter(Boolean);
         const localCodes = readPromoCodes();
         const map = new Map<string, any>();
         for (const c of localCodes) {
           if (c && c.code) map.set(c.code.toUpperCase(), c);
         }
-        for (const c of cloudCodes) {
-          if (c && c.code) map.set(c.code.toUpperCase(), c);
+
+        // Fetch each key from Cloud KV
+        for (const k of keys.slice(0, 20)) {
+          try {
+            const keyRes = await fetch(`${CLOUD_BASE_URL}/GetValue/${CLOUD_APP_KEY_PRIMARY}/${encodeURIComponent(k)}`, {
+              signal: AbortSignal.timeout(2000),
+            });
+            if (keyRes.ok) {
+              const valText = await keyRes.text();
+              let cleanVal = valText.trim();
+              if (cleanVal.startsWith('"') && cleanVal.endsWith('"')) {
+                cleanVal = cleanVal.slice(1, -1);
+              }
+              const parts = cleanVal.split('_');
+              if (parts.length >= 3) {
+                const typeCode = parts[0];
+                const valStr = parts[1];
+                const mode = parts[2];
+                const maxUses = parseInt(parts[3], 10) || (mode === 'AUD' ? 999999 : 1);
+                let rewardType = 'money';
+                let rewardValue: any = 50000;
+                if (typeCode === 'M') {
+                  rewardType = 'money';
+                  rewardValue = Number(valStr) || 50000;
+                } else if (typeCode === 'XP') {
+                  rewardType = 'xp';
+                  rewardValue = Number(valStr) || 1000;
+                } else if (typeCode === 'REP') {
+                  rewardType = 'rep';
+                  rewardValue = Number(valStr) || 0.5;
+                } else if (typeCode === 'ITM') {
+                  rewardType = 'item';
+                  try {
+                    rewardValue = decodeURIComponent(atob(valStr.replace(/-/g, '+').replace(/_/g, '/')));
+                  } catch {
+                    rewardValue = valStr;
+                  }
+                }
+                let desc = 'Промокод для игроков';
+                if (parts[4]) {
+                  try {
+                    desc = decodeURIComponent(atob(parts[4].replace(/-/g, '+').replace(/_/g, '/')));
+                  } catch {
+                    desc = 'Промокод для игроков';
+                  }
+                }
+
+                map.set(k.toUpperCase(), {
+                  code: k.toUpperCase(),
+                  rewardType,
+                  rewardValue,
+                  description: desc,
+                  forAudience: mode === 'AUD',
+                  maxUses,
+                  usedCount: 0,
+                  isCustom: true,
+                  createdAt: Date.now(),
+                });
+              }
+            }
+          } catch {
+            // individual key fallback
+          }
         }
+
         const merged = Array.from(map.values());
         savePromoCodes(merged);
         return merged;
@@ -113,18 +219,20 @@ async function syncWithGlobalCloud(): Promise<any[]> {
 
 async function pushToGlobalCloud(codes: any[]) {
   try {
-    await fetch(GLOBAL_CLOUD_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'PEREKUP_GLOBAL_PROMO_5c311207',
-        data: {
-          updatedAt: Date.now(),
-          promoCodes: codes,
-        },
+    const keys = codes.map(c => c.code.toUpperCase()).slice(0, 30);
+    const indexStr = encodeURIComponent(keys.join(','));
+    await Promise.allSettled([
+      fetch(`${CLOUD_BASE_URL}/UpdateValue/${CLOUD_APP_KEY_PRIMARY}/PROMO_INDEX/${indexStr}`, {
+        method: 'POST',
+        headers: { 'Content-Length': '0' },
+        signal: AbortSignal.timeout(3000),
       }),
-      signal: AbortSignal.timeout(5000),
-    });
+      fetch(`${CLOUD_BASE_URL}/UpdateValue/${CLOUD_APP_KEY_BACKUP}/PROMO_INDEX/${indexStr}`, {
+        method: 'POST',
+        headers: { 'Content-Length': '0' },
+        signal: AbortSignal.timeout(3000),
+      }),
+    ]);
   } catch (err) {
     console.warn('Could not push to global cloud:', err);
   }
@@ -262,6 +370,27 @@ app.delete('/api/promo-codes/:code', async (req, res) => {
   res.json({ success: true, message: 'Промокод успешно удален' });
 });
 
+function normalizeCode(raw: string): string {
+  if (!raw) return '';
+  let s = raw.trim().toUpperCase();
+
+  if (s.startsWith('РУБ')) {
+    s = 'RUB' + s.slice(3);
+  } else if (s.startsWith('РУВ')) {
+    s = 'RUB' + s.slice(3);
+  }
+
+  if (s.startsWith('ЦЦЦЦ')) {
+    s = 'WWWW' + s.slice(4);
+  }
+
+  const map: Record<string, string> = {
+    'А': 'A', 'В': 'B', 'Б': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H',
+    'О': 'O', 'Р': 'R', 'С': 'C', 'Т': 'T', 'У': 'U', 'Х': 'X',
+  };
+  return s.split('').map(ch => map[ch] || ch).join('');
+}
+
 // POST redeem promo code (from ANY device: tablet, phone, PC, any country)
 app.post('/api/promo-codes/redeem', async (req, res) => {
   const { code } = req.body;
@@ -269,14 +398,22 @@ app.post('/api/promo-codes/redeem', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Введите код' });
   }
 
-  const cleanCode = code.trim().toUpperCase();
+  const cleanCode = normalizeCode(code);
+  const alphaCode = cleanCode.replace(/[^A-Z0-9]/g, '');
+
   let codes = readPromoCodes();
-  let promo = codes.find((p: any) => p.code.toUpperCase() === cleanCode);
+  const findMatch = (list: any[]) =>
+    list.find((p: any) => {
+      const norm = normalizeCode(p.code);
+      return norm === cleanCode || (alphaCode && norm.replace(/[^A-Z0-9]/g, '') === alphaCode);
+    });
+
+  let promo = findMatch(codes);
 
   if (!promo) {
     // If not found in local cache, do a fresh sync with the global cloud
     codes = await syncWithGlobalCloud();
-    promo = codes.find((p: any) => p.code.toUpperCase() === cleanCode);
+    promo = findMatch(codes);
   }
 
   if (!promo) {

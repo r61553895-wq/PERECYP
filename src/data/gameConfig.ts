@@ -180,7 +180,41 @@ export const INITIAL_QUESTS: Quest[] = [
   },
 ];
 
-export const DEFAULT_PROMO_CODES: PromoCode[] = [];
+export const DEFAULT_PROMO_CODES: PromoCode[] = [
+  {
+    code: 'RUB-3551',
+    rewardType: 'money',
+    rewardValue: 600000,
+    description: 'Промокод для зрителей',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+  {
+    code: 'RRRR-1111',
+    rewardType: 'money',
+    rewardValue: 50000,
+    description: 'Промокод для зрителей',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+  {
+    code: 'WWWW-6666',
+    rewardType: 'money',
+    rewardValue: 50000,
+    description: 'Бонусный промо-ключ',
+    forAudience: true,
+    maxUses: 999999,
+    usedCount: 0,
+    isCustom: true,
+    createdAt: 1726400000000,
+  },
+];
 
 export const SAMPLE_BUYER_REVIEWS = [
   {
