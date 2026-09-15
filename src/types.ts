@@ -130,14 +130,17 @@ export interface BusinessWarehouse {
   costToUpgrade: number;
 }
 
+export type PromoRewardType = 'money' | 'xp' | 'rep' | 'item';
+
 export interface PromoCode {
   code: string;
-  rewardType: 'money' | 'xp' | 'rep' | 'item';
+  rewardType: PromoRewardType;
   rewardValue: number | string;
   description: string;
   maxUses: number;
   usedCount: number;
   isCustom?: boolean;
+  createdAt?: number;
 }
 
 export interface MarketNews {

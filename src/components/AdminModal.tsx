@@ -21,6 +21,7 @@ import {
 import { PromoCode } from '../types';
 import { ITEM_BLUEPRINTS, CATEGORY_LABELS } from '../data/itemsData';
 import { adminGuard, secureTimingSafeCompare } from '../services/security';
+import { generateUniversalVoucher } from '../services/voucher';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -665,7 +666,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                           <button
                             type="button"
                             onClick={() => copyToClipboard(p.code, p.code)}
-                            title={`Скопировать ключ ${p.code}`}
+                            title={`Скопировать код «${p.code}»`}
                             className={`p-1.5 rounded-md border transition-all active:scale-90 ${
                               copiedCodeId === p.code
                                 ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
@@ -676,6 +677,26 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, onClose }) => {
                               <Check className="w-3.5 h-3.5 text-emerald-600" />
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const vk = generateUniversalVoucher(p.rewardType, p.rewardValue);
+                              copyToClipboard(vk, `vk_${p.code}`);
+                            }}
+                            title="Скопировать универсальный ключ (VK-...) — работает на любом телефоне/планшете даже без сети"
+                            className={`p-1.5 rounded-md border transition-all active:scale-90 ${
+                              copiedCodeId === `vk_${p.code}`
+                                ? 'bg-amber-50 border-amber-300 text-amber-600'
+                                : 'border-neutral-200 text-amber-600 hover:bg-amber-50 hover:border-amber-200'
+                            }`}
+                          >
+                            {copiedCodeId === `vk_${p.code}` ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : (
+                              <Key className="w-3.5 h-3.5" />
                             )}
                           </button>
 

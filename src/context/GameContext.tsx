@@ -33,6 +33,7 @@ import {
   deletePromoCodeOnServer,
   redeemPromoCodeOnServer,
 } from '../services/api';
+import { parseAndValidateUniversalVoucher } from '../services/voucher';
 
 interface GameContextType {
   // Player financials & status
@@ -1001,7 +1002,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const lastPromoAttemptRef = useRef<number>(0);
 
-  // Redeem Promo Code with Cloud Server Validation (cross-device) + Anti-Spam
+  // Redeem Promo Code with Cloud Server Validation (cross-device) + Universal Voucher Fail-safe
   const redeemPromoCode = useCallback(
     async (rawCode: string): Promise<{ success: boolean; message: string }> => {
       const now = Date.now();
@@ -1011,36 +1012,70 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       lastPromoAttemptRef.current = now;
 
       const cleanCode = rawCode.trim().toUpperCase();
-
-      // 1. First validate on the cloud server (so promo created on tablet works on phone)
-      const serverResult = await redeemPromoCodeOnServer(cleanCode);
-
       let targetPromo: PromoCode | null = null;
 
-      if (serverResult.success && serverResult.promo) {
-        targetPromo = serverResult.promo;
-      } else if (serverResult.status === 410) {
-        // Explicitly expired / out of uses on server
-        playError(soundEnabled);
-        return {
-          success: false,
-          message: serverResult.message || `Промокод «${cleanCode}» устарел (лимит исчерпан)`,
-        };
-      } else {
-        // If 404 on server or offline, check if code exists in local memory
-        const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
-        if (local) {
-          if (local.usedCount >= local.maxUses) {
+      // 1. Check if this is a Universal Self-Verifying Voucher (works 100% offline & cross-device)
+      const voucherPromo = parseAndValidateUniversalVoucher(cleanCode);
+      if (voucherPromo) {
+        try {
+          const usedVouchersKey = 'perekup_used_vouchers_v1';
+          const usedList: string[] = JSON.parse(localStorage.getItem(usedVouchersKey) || '[]');
+          if (usedList.includes(cleanCode)) {
             playError(soundEnabled);
-            return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
+            return { success: false, message: 'Этот универсальный ключ уже был активирован на этом устройстве' };
           }
-          targetPromo = local;
-        } else {
+          usedList.push(cleanCode);
+          localStorage.setItem(usedVouchersKey, JSON.stringify(usedList.slice(-100)));
+          targetPromo = voucherPromo;
+        } catch {
+          targetPromo = voucherPromo;
+        }
+      }
+
+      // 2. If not a voucher, validate on the cloud server (cross-device database)
+      if (!targetPromo) {
+        const serverResult = await redeemPromoCodeOnServer(cleanCode);
+
+        if (serverResult.success && serverResult.promo) {
+          targetPromo = serverResult.promo;
+        } else if (serverResult.status === 410) {
           playError(soundEnabled);
           return {
             success: false,
-            message: serverResult.message || `Промокод «${cleanCode}» не найден или устарел`,
+            message: serverResult.message || `Промокод «${cleanCode}» устарел (лимит исчерпан)`,
           };
+        } else if (serverResult.status === 404) {
+          // Check local memory as fallback
+          const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
+          if (local) {
+            if (local.usedCount >= local.maxUses) {
+              playError(soundEnabled);
+              return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
+            }
+            targetPromo = local;
+          } else {
+            playError(soundEnabled);
+            return {
+              success: false,
+              message: `Промокод «${cleanCode}» не найден`,
+            };
+          }
+        } else {
+          // Status 0 (network unreachable or cross-instance)
+          const local = promoCodes.find(p => p.code.toUpperCase() === cleanCode);
+          if (local) {
+            if (local.usedCount >= local.maxUses) {
+              playError(soundEnabled);
+              return { success: false, message: `Промокод «${cleanCode}» уже был активирован` };
+            }
+            targetPromo = local;
+          } else {
+            playError(soundEnabled);
+            return {
+              success: false,
+              message: `Не удалось связаться с сервером для проверки «${cleanCode}». Создайте универсальный ключ (начинается с VK-) в панели разработчика для мгновенного переноса между любыми устройствами.`,
+            };
+          }
         }
       }
 
@@ -1049,7 +1084,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: false, message: `Промокод «${cleanCode}» не найден` };
       }
 
-      // 2. Apply reward with sanitized limits
+      // 3. Apply reward with sanitized limits
       if (targetPromo.rewardType === 'money') {
         const val = Math.min(10000000, Math.max(0, Math.floor(Number(targetPromo.rewardValue)) || 0));
         setMoney(m => Math.max(0, m + val));
